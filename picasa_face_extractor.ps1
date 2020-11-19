@@ -1,22 +1,21 @@
-# Scan for .picasa.ini files and convert them 'faces' entries into XMP metadata
+# Scan .picasa.ini files and convert the 'faces' entries into XMP metadata
 #
-# The XMP metadata is modelled on the metadata produces by DigiKam 7.4, which
+# The XMP metadata is modelled on the metadata produced by DigiKam 7.4, which
 # includes a number of tags for various software packages.
 
-#using assembly System.Xml.Linq # Doesn't work? Use Add-Type instead
 using namespace System.Xml.Linq 
-
-Import-Module PsIni
 Add-Type -AssemblyName System.Xml.Linq 
+Import-Module PsIni
 
-$contactSecion = "Contacts2"
-
-#$ErrorActionPreference = "Inquire"
+# Folder to scan
+$folder = "<The folder to scan - sub-folders are included>"
 
 #region picasa.ini
 
+$contactSection = "Contacts2"
+
 function Test-PicasaIniContainsContacts([System.Collections.Specialized.OrderedDictionary]$iniFile) {
-    $iniFile.Contains($contactSecion)
+    $iniFile.Contains($contactSection)
 }
 
 # See https://gist.github.com/fbuchinger/1073823
@@ -54,19 +53,19 @@ $nsLightRoom = [XNamespace]"http://ns.adobe.com/lightroom/1.0/"
 $nsMediaPro = [XNamespace]"http://ns.iview-multimedia.com/mediapro/1.0/"
 $nsAdobe = [XNamespace]"adobe:ns:meta/"
 
-function ConvertTo-RdfLi($nodeContents) {
+function ConvertTo-RdfLiElements($nodeContents) {
     $nodeContents | ForEach-Object { [XElement]::new($nsRDF + "li", $_.ToString()) }
 }
 
-function ConvertTo-RdfBag($nodeContents) {
-    [XElement]::new($nsRDF + "Bag", (ConvertTo-RdfLi $nodeContents))
+function ConvertTo-RdfBagElement($nodeContents) {
+    [XElement]::new($nsRDF + "Bag", (ConvertTo-RdfLiElements $nodeContents))
 }
 
-function ConvertTo-RdfSeq($nodeContents) {
-    [XElement]::new($nsRDF + "Seq", (ConvertTo-RdfLi $nodeContents))
+function ConvertTo-RdfSeqElement($nodeContents) {
+    [XElement]::new($nsRDF + "Seq", (ConvertTo-RdfLiElements $nodeContents))
 }
 
-function ConvertTo-XmpArea($xmpRectangle) {
+function ConvertTo-XmpAreaElement($xmpRectangle) {
     [XElement]::new($nsMWG + "Area", @(
         [XAttribute]::new($nsStArea + 'x', $xmpRectangle.x),
         [XAttribute]::new($nsStArea + 'y', $xmpRectangle.y),
@@ -75,26 +74,26 @@ function ConvertTo-XmpArea($xmpRectangle) {
     ))
 }
 
-function ConvertTo-RdfFaceDescription($picasaFace) {
+function ConvertTo-RdfFaceDescriptionElement($picasaFace) {
     [XElement]::new($nsRDF + "li", @(
         [XElement]::new($nsRDF + "Description", @(
             [XAttribute]::new($nsMWG + 'Name', $picasaFace.Contact),
             [XAttribute]::new($nsMWG + 'Type', 'Face'),
-            (ConvertTo-XmpArea (ConvertTo-XmpRectangle (ConvertTo-TypedCropRectangle $picasaFace.Rectangle)))
+            (ConvertTo-XmpAreaElement (ConvertTo-XmpRectangle (ConvertTo-TypedCropRectangle $picasaFace.Rectangle)))
         ))
     ))
 }
 
-function ConvertTo-XmpRegions($people) {
+function ConvertTo-XmpRegionsElement($people) {
     [XElement]::new($nsMWG + "Regions", @(
         [XAttribute]::new($nsRDF + 'parseType', "Resource")
         [XElement]::new($nsMWG + "RegionList", @(
-            [XElement]::new($nsRDF + "Bag", ($people | ForEach-Object { ConvertTo-RdfFaceDescription $_ }))
+            [XElement]::new($nsRDF + "Bag", ($people | ForEach-Object { ConvertTo-RdfFaceDescriptionElement $_ }))
         ))
     ))
 }
 
-function ConvertTo-Xmp($people) {
+function ConvertTo-XmpDoc($picasaFaces) {
     [XDocument]::new( 
         [XDeclaration]::new('1.0', 'utf-8', 'yes'), 
         [XElement]::new($nsAdobe + 'xmpmeta', @( 
@@ -113,12 +112,12 @@ function ConvertTo-Xmp($people) {
 
             [XElement]::new($nsRDF + "RDF",
                 [XElement]::new($nsRDF + "Description", @(
-                    [XElement]::new($nsDC + "subject", (ConvertTo-RdfBag  ($people | ForEach-Object { $_.Contact }))),
-                    [XElement]::new($nsDigiKam + "TagsList", (ConvertTo-RdfSeq ($people | ForEach-Object { $_.Contact }))),
-                    [XElement]::new($nsMicrosoftPhoto + "LastKeywordXMP", (ConvertTo-RdfBag  ($people | ForEach-Object { $_.Contact }))),
-                    [XElement]::new($nsLightRoom + "hierarchicalSubject", (ConvertTo-RdfBag  ($people | ForEach-Object { $_.Contact }))),
-                    [XElement]::new($nsMediaPro + "CatalogSets", (ConvertTo-RdfBag  ($people | ForEach-Object { $_.Contact }))),
-                    (ConvertTo-XmpRegions $people)
+                    [XElement]::new($nsDC + "subject", (ConvertTo-RdfBagElement  ($picasaFaces | ForEach-Object { $_.Contact }))),
+                    [XElement]::new($nsDigiKam + "TagsList", (ConvertTo-RdfSeqElement ($picasaFaces | ForEach-Object { $_.Contact }))),
+                    [XElement]::new($nsMicrosoftPhoto + "LastKeywordXMP", (ConvertTo-RdfBagElement  ($picasaFaces | ForEach-Object { $_.Contact }))),
+                    [XElement]::new($nsLightRoom + "hierarchicalSubject", (ConvertTo-RdfBagElement  ($picasaFaces | ForEach-Object { $_.Contact }))),
+                    [XElement]::new($nsMediaPro + "CatalogSets", (ConvertTo-RdfBagElement  ($picasaFaces | ForEach-Object { $_.Contact }))),
+                    (ConvertTo-XmpRegionsElement $picasaFaces)
                 ))
             )
         ))
@@ -127,19 +126,16 @@ function ConvertTo-Xmp($people) {
 
 #endregion XMP
 
-
-$folder = "\\Desktop-27m6eeq\D\Users\Bancrofts\pictures\old mo pics"
-
 $files = Get-ChildItem -Path $folder -Include .picasa.ini -Recurse -File -Force
 
 # Load & parse .picasa.ini files
 $picasaIniFiles = $files | Select-Object @{l='IniFile';e= { $_ }},@{l='ini';e={Get-IniContent $_} }
-# First pass filter on those files that don't contain contacts (no contacts = no faces)
+# First pass filter on those files that don't contain contacts (no contacts => no faces)
 $picasaIniFiles = @($picasaIniFiles | Where-Object { Test-PicasaIniContainsContacts $_.ini })
 # Pull out the sections we need
 # Note: Powershell defaults to iterating dictionary values. Since we need the keys as well, we
 # have to workaround the default behavior by directly calling GetEnumerator()
-$picasaIniFiles = $picasaIniFiles | Select-Object IniFile,@{l='Ini';e={$_.Ini.GetEnumerator()}}, @{l='Contacts';e={$_.Ini[$contactSecion]}}
+$picasaIniFiles = $picasaIniFiles | Select-Object IniFile,@{l='Ini';e={$_.Ini.GetEnumerator()}}, @{l='Contacts';e={$_.Ini[$contactSection]}}
 
 # Extract all the 'face' INI file entries, carrying along enough information to
 # create XMP equivalent metadata
@@ -154,7 +150,7 @@ $iniSections = $iniSections | Select-Object `
 # Filter sections that don't refer to a real file
 $iniSections = @($iniSections | Where-Object { Test-Path $_.ImageFile })
 
-# Grab ini lines & remove everything but face entries (lines)
+# Flatten to individual ini lines & remove everything but face entries (lines)
 $faceEntries = @($iniSections | 
     Select-Object Contacts,ImageFile -ExpandProperty Entries | 
     Where-Object { $_.Key -eq 'faces' })
@@ -182,15 +178,15 @@ $faceEntries = $faceEntries | Select-Object -Property ImageFile, `
 $imageFiles = $faceEntries | Group-Object -Property ImageFile
 
 # Convert to Xml
-$xmp = $imageFiles | Select-Object -Property Name,@{l='Xml';e={ ConvertTo-Xmp $_.Group }}
+$xmp = $imageFiles | Select-Object -Property Name,@{l='Xml';e={ ConvertTo-XmpDoc $_.Group }}
 
 # Now apply the XMP metadata - via exiftool.
-$exifTool = "C:\Scratch\Image_Processing\exiftool\exiftool.exe"
-$scratchXmpFile = "C:\Scratch\test.xmp"
+# $exifTool = "C:\Scratch\Image_Processing\exiftool\exiftool.exe"
+# $scratchXmpFile = "C:\Scratch\test.xmp"
 
-foreach ($entry in $xmp) {
-    $entry.Name
+# foreach ($entry in $xmp) {
+#     $entry.Name
 
-    $entry.Xml.Save($scratchXmpFile)
-    & $exifTool -overwrite_original -q -q -tagsFromFile $scratchXmpFile $entry.Name
-}
+#     $entry.Xml.Save($scratchXmpFile)
+#     & $exifTool -overwrite_original -q -q -tagsFromFile $scratchXmpFile $entry.Name
+# }
